@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<script>
+    const config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        physics: { default: 'arcade' },
+        scene: { preload: preload, create: create, update: update }
+    };
+
+    const game = new Phaser.Game(config);
+    let socket;
+
+    function preload() {}
+
+    function create() {
+        const self = this;
+        this.socket = io();
+        this.otherPlayers = this.physics.add.group();
+        this.circles = new Map(); // Store circle objects here
+
+        // Setup Keyboard
+        this.cursors = this.input.keyboard.addKeys('W,S,A,D,F');
+
+        // Socket Listeners
+        this.socket.on('currentPlayers', (players) => {
+            Object.keys(players).forEach((id) => {
+                if (players[id].playerId === self.socket.id) {
+                    addPlayer(self, players[id]);
+                } else {
+                    addOtherPlayers(self, players[id]);
+                }
+            });
+        });
+
+        this.socket.on('newPlayer', (playerInfo) => {
+            addOtherPlayers(self, playerInfo);
+        });
+
+        this.socket.on('playerMoved', (playerInfo) => {
+            self.otherPlayers.getChildren().forEach((otherPlayer) => {
+                if (playerInfo.playerId === otherPlayer.playerId) {
+                    otherPlayer.setPosition(playerInfo.x, playerInfo.y);
+                }
+            });
+        });
+
+        this.socket.on('spawnCircles', (circlesData) => {
+            circlesData.forEach(data => {
+                let circle = this.add.circle(data.x, data.y, 15, 0xffffff);
+                circle.id = data.id;
+                this.circles.set(data.id, circle);
+            });
+        });
+
+        this.socket.on('circleGrabbed', (data) => {
+            const circle = this.circles.get(data.circleId);
+            if (circle) circle.owner = data.playerId;
+        });
+
+        this.socket.on('circleDropped', (data) => {
+            const circle = this.circles.get(data.circleId);
+            if (circle) {
+                circle.owner = null;
+                circle.setPosition(data.x, data.y);
+            }
+        });
+
+        this.socket.on('disconnected', (playerId) => {
+            self.otherPlayers.getChildren().forEach((otherPlayer) => {
+                if (playerId === otherPlayer.playerId) otherPlayer.destroy();
+            });
+        });
+
+        this.statusText = this.add.text(400, 50, 'Waiting...', { fontSize: '24px' }).setOrigin(0.5);
+        this.socket.on('gameStarted', () => this.statusText.setText('GAME STARTED!'));
+    }
+
+    function update() {
+        if (!this.container) return;
+
+        const speed = 3;
+        let moved = false;
+
+        // Movement Logic
+        if (this.cursors.A.isDown) { this.container.x -= speed; moved = true; }
+        if (this.cursors.D.isDown) { this.container.x += speed; moved = true; }
+        if (this.cursors.W.isDown) { this.container.y -= speed; moved = true; }
+        if (this.cursors.S.isDown) { this.container.y += speed; moved = true; }
+
+        if (moved) {
+            this.socket.emit('playerMovement', { x: this.container.x, y: this.container.y });
+        }
+
+        // Grab Logic: Use JustDown so it only triggers ONCE per press
+        if (Phaser.Input.Keyboard.JustDown(this.cursors.F)) {
+            this.socket.emit('toggleGrab');
+        }
+
+        // Circle Follow Logic: MUST BE IN UPDATE
+        this.circles.forEach((circle) => {
+            if (circle.owner) {
+                if (circle.owner === this.socket.id) {
+                    circle.setPosition(this.container.x, this.container.y);
+                } else {
+                    this.otherPlayers.getChildren().forEach(other => {
+                        if (other.playerId === circle.owner) {
+                            circle.setPosition(other.x, other.y);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    function addPlayer(self, playerInfo) {
+        self.container = self.add.rectangle(playerInfo.x, playerInfo.y, 40, 40, playerInfo.color);
+        self.physics.add.existing(self.container);
+    }
+
+    function addOtherPlayers(self, playerInfo) {
+        const otherPlayer = self.add.rectangle(playerInfo.x, playerInfo.y, 40, 40, playerInfo.color);
+        otherPlayer.playerId = playerInfo.playerId;
+        self.otherPlayers.add(otherPlayer);
+    }
+</script>
+</body>
+</html>
