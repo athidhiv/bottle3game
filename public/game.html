@@ -1,15 +1,244 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Multiplayer Bottle Arena</title>
-
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
-  <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
+<body style="margin: 0; background: #222;">
+<div id="endUI" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); color:white; flex-direction:column; align-items:center; justify-content:center; font-family: sans-serif; z-index:9999;">
+    <h1 id="winnerText"></h1>
+    <button onclick="playAgain()">Play Again</button>
+    <button onclick="goHome()">Back Home</button>
+    <p id="rematchCount"></p>
+</div>
 
-<body>
-  <h2 style="text-align:center;">Bottle Arena Multiplayer</h2>
-  <script src="main.js"></script>
+<script>
+let socket;
+const roomName = sessionStorage.getItem("roomName");
+const numPlayers = parseInt(sessionStorage.getItem("numPlayers"));
+
+const config = {
+    type: Phaser.AUTO,
+    scale: {
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: window.innerWidth,
+        height: window.innerHeight
+    },
+    backgroundColor: "#111",
+    physics: { default: "arcade", arcade: { debug: false } },
+    scene: { preload, create, update }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {}
+
+function create() {
+    const self = this;
+
+    this.worldWidth = this.scale.width;
+    this.worldHeight = this.scale.height;
+    this.centerX = this.worldWidth / 2;
+    this.centerY = this.worldHeight / 2;
+    this.arenaRadius = Math.min(this.worldWidth, this.worldHeight) * 0.4;
+
+    this.arena = this.add.circle(this.centerX, this.centerY, this.arenaRadius, 0x444444, 0.15)
+        .setStrokeStyle(4, 0xffffff, 0.4);
+
+    this.playerSize = this.arenaRadius * 0.08;
+    this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.005;
+
+    // --- RESIZE HANDLER ---
+    this.scale.on("resize", (gameSize) => {
+        this.worldWidth = gameSize.width;
+        this.worldHeight = gameSize.height;
+        this.centerX = this.worldWidth / 2;
+        this.centerY = this.worldHeight / 2;
+        this.arenaRadius = Math.min(this.worldWidth, this.worldHeight) * 0.4;
+        this.arena.setPosition(this.centerX, this.centerY).setRadius(this.arenaRadius);
+        this.playerSize = this.arenaRadius * 0.08;
+    });
+
+    // --- INPUT ---
+    this.touchStart = null;
+    this.input.on("pointerdown", p => { this.touchStart = { x: p.x, y: p.y }; });
+    this.input.on("pointerup", p => {
+        if (!this.touchStart) return;
+        const dx = p.x - this.touchStart.x;
+        const dy = p.y - this.touchStart.y;
+        if (Math.hypot(dx, dy) < 20) socket.emit("toggleGrab");
+        this.touchStart = null;
+    });
+
+    this.cursors = this.input.keyboard.addKeys("W,S,A,D,F");
+
+    // --- SOCKET ---
+    this.socket = io();
+    socket = this.socket;
+
+    this.otherPlayers = this.physics.add.group();
+    this.circles = new Map();
+    this.zones = new Map();
+
+    // --- PLAYER SYNC ---
+    socket.on("currentPlayers", players => {
+        Object.values(players).forEach(p => {
+            if (p.playerId === socket.id) addPlayer(self, p);
+            else addOtherPlayers(self, p);
+        });
+    });
+
+    socket.on("newPlayer", p => addOtherPlayers(self, p));
+
+    socket.on("playerMoved", p => {
+    self.otherPlayers.getChildren().forEach(o => {
+        if (o.playerId === p.playerId) {
+            // Update player position
+            o.setPosition(
+                self.centerX + p.x * self.arenaRadius,
+                self.centerY + p.y * self.arenaRadius
+            );
+
+            // If this player is holding a bottle, move it along
+            if (p.holding) {
+                const c = self.circles.get(p.holding);
+                if (c) {
+                    c.setPosition(
+                        self.centerX + p.x * self.arenaRadius,
+                        self.centerY + p.y * self.arenaRadius
+                    );
+                }
+            }
+        }
+    });
+});
+
+
+    // --- CIRCLES ---
+    socket.on("spawnCircles", circlesData => {
+        const size = self.arenaRadius * 0.04;
+        circlesData.forEach(d => {
+            if (!self.circles.has(d.id)) {
+                const c = self.add.circle(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius, size, 0xffffff);
+                c.id = d.id;
+                self.circles.set(d.id, c);
+            }
+        });
+    });
+
+    socket.on("circleGrabbed", d => {
+    const c = self.circles.get(d.circleId);
+    if (c) c.owner = d.playerId;
+
+    // Update local holding if it's me
+    if (d.playerId === self.socket.id) {
+        self.player.holding = d.circleId;
+    }
+});
+
+socket.on("circleDropped", d => {
+    const c = self.circles.get(d.circleId);
+    if (c) {
+        c.owner = null;
+        c.setPosition(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius);
+    }
+
+    // Clear local holding if I dropped it
+    if (d.playerId === self.socket.id) {
+        self.player.holding = null;
+    }
+});
+
+
+    // --- ZONES ---
+    socket.on("spawnZones", zonesData => {
+        zonesData.forEach(z => {
+            if (!self.zones.has(z.id)) {
+                const zone = self.add.circle(self.centerX + z.x * self.arenaRadius, self.centerY + z.y * self.arenaRadius, z.r * self.arenaRadius, z.color, 0.3);
+                zone.id = z.id;
+                zone.countText = self.add.text(zone.x, zone.y, z.count || 0, { fontSize: `${z.r * self.arenaRadius * 0.6}px`, color: "#fff" }).setOrigin(0.5);
+                self.zones.set(z.id, zone);
+            }
+        });
+    });
+
+    socket.on("zoneUpdated", d => {
+        const z = self.zones.get(d.zoneId);
+        if (z) z.countText.setText(d.count);
+    });
+
+    socket.on("gameOver", d => showEndUI(d.winner));
+
+    socket.emit("joinGame", { numPlayers, roomName: roomName || null });
+}
+
+function update() {
+    if (!this.container) return;
+
+    const speed = this.playerSpeed;
+    let moved = false;
+    // Inside update(), after moving this.container
+if (this.player.holding) {
+    const c = this.circles.get(this.player.holding);
+    if (c) {
+        c.setPosition(this.container.x, this.container.y);
+    }
+}
+
+
+    // --- TOUCH MOVE ---
+    if (this.input.pointer1.isDown && this.touchStart) {
+        const dx = this.input.pointer1.x - this.touchStart.x;
+        const dy = this.input.pointer1.y - this.touchStart.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 10) { this.container.x += (dx / len) * speed; this.container.y += (dy / len) * speed; moved = true; }
+    }
+
+    // --- KEYBOARD MOVE ---
+    if (this.cursors.A.isDown) { this.container.x -= speed; moved = true; }
+    if (this.cursors.D.isDown) { this.container.x += speed; moved = true; }
+    if (this.cursors.W.isDown) { this.container.y -= speed; moved = true; }
+    if (this.cursors.S.isDown) { this.container.y += speed; moved = true; }
+
+    // --- CLAMP TO ARENA ---
+    const dx = this.container.x - this.centerX;
+    const dy = this.container.y - this.centerY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > this.arenaRadius) {
+        const a = Math.atan2(dy, dx);
+        this.container.x = this.centerX + Math.cos(a) * this.arenaRadius;
+        this.container.y = this.centerY + Math.sin(a) * this.arenaRadius;
+    }
+
+    // --- SEND MOVE ---
+    if (moved) socket.emit("playerMovement", { x: (this.container.x - this.centerX) / this.arenaRadius, y: (this.container.y - this.centerY) / this.arenaRadius });
+
+    // --- GRAB ---
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.F)) socket.emit("toggleGrab");
+    // Server sends updated circle positions
+
+}
+
+function addPlayer(self, p) {
+    self.container = self.add.rectangle(self.centerX + p.x * self.arenaRadius, self.centerY + p.y * self.arenaRadius, self.playerSize, self.playerSize, p.color);
+    self.physics.add.existing(self.container);
+}
+
+function addOtherPlayers(self, p) {
+    const o = self.add.rectangle(self.centerX + p.x * self.arenaRadius, self.centerY + p.y * self.arenaRadius, self.playerSize, self.playerSize, p.color);
+    o.playerId = p.playerId;
+    self.otherPlayers.add(o);
+    self.physics.add.existing(o);
+}
+
+function showEndUI(winner) {
+    document.getElementById("endUI").style.display = "flex";
+    document.getElementById("winnerText").innerText = "Winner: " + winner;
+}
+
+function playAgain() { socket.emit("requestRematch"); }
+function goHome() { socket.emit("leaveRoom"); window.location.href = "/index.html"; }
+</script>
 </body>
 </html>
