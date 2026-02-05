@@ -1,10 +1,10 @@
 const express = require('express');
 const app = express();
-const http = require('http').createServer(app);
-const io = require('socket.io')(http);
-
+const http = require('http');           // just require http
+const server = http.createServer(app);  // create server once
+const { Server } = require('socket.io');
+const io = new Server(server);  
 app.use(express.static(__dirname + '/public'));
-
 let players = {};
 let rooms = {};
 const WORLD_RADIUS = 1;
