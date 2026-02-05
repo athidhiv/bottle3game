@@ -7,7 +7,8 @@
 <body style="margin: 0; background: #222;">
 <div id="endUI" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); color:white; flex-direction:column; align-items:center; justify-content:center; font-family: sans-serif; z-index:9999;">
     <h1 id="winnerText"></h1>
-    <button onclick="playAgain()">Play Again</button>
+    <div id="statsBox" style="margin-top:20px; text-align:left;"></div>
+    <button id="rematchbtn" onclick="playAgain()">REMATCH</button>
     <button onclick="goHome()">Back Home</button>
     <p id="rematchCount"></p>
 </div>
@@ -16,7 +17,10 @@
 let socket;
 const roomName = sessionStorage.getItem("roomName");
 const numPlayers = parseInt(sessionStorage.getItem("numPlayers"));
-
+const playerName = sessionStorage.getItem("playerName");
+let matchStartTime = 0;
+let matchHistory = [];
+let winCounts = {};
 const config = {
     type: Phaser.AUTO,
     scale: {
@@ -25,7 +29,7 @@ const config = {
         width: window.innerWidth,
         height: window.innerHeight
     },
-    backgroundColor: "#111",
+    backgroundColor: "#000",
     physics: { default: "arcade", arcade: { debug: false } },
     scene: { preload, create, update }
 };
@@ -46,8 +50,8 @@ function create() {
     this.arena = this.add.circle(this.centerX, this.centerY, this.arenaRadius, 0x444444, 0.15)
         .setStrokeStyle(4, 0xffffff, 0.4);
 
-    this.playerSize = this.arenaRadius * 0.08;
-    this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.005;
+    this.playerSize = this.arenaRadius * 0.09;
+    this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.004;
 
     // --- RESIZE HANDLER ---
     this.scale.on("resize", (gameSize) => {
@@ -57,19 +61,42 @@ function create() {
         this.centerY = this.worldHeight / 2;
         this.arenaRadius = Math.min(this.worldWidth, this.worldHeight) * 0.4;
         this.arena.setPosition(this.centerX, this.centerY).setRadius(this.arenaRadius);
-        this.playerSize = this.arenaRadius * 0.08;
+        this.playerSize = this.arenaRadius * 0.09;
+        this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.004;
+
+        // Update zones
+        this.zones.forEach(zone => {
+            zone.setPosition(this.centerX + zone.relX * this.arenaRadius, this.centerY + zone.relY * this.arenaRadius);
+            zone.setRadius(zone.relR * this.arenaRadius);
+            zone.countText.setPosition(zone.x, zone.y).setFontSize(zone.relR * this.arenaRadius * 0.6);
+        });
+
+        // Update circles
+        this.circles.forEach(c => {
+            c.setPosition(this.centerX + c.relX * this.arenaRadius, this.centerY + c.relY * this.arenaRadius);
+            c.setRadius(this.arenaRadius * 0.04);
+        });
     });
 
     // --- INPUT ---
-    this.touchStart = null;
-    this.input.on("pointerdown", p => { this.touchStart = { x: p.x, y: p.y }; });
-    this.input.on("pointerup", p => {
-        if (!this.touchStart) return;
-        const dx = p.x - this.touchStart.x;
-        const dy = p.y - this.touchStart.y;
-        if (Math.hypot(dx, dy) < 20) socket.emit("toggleGrab");
-        this.touchStart = null;
-    });
+    // --- JOYSTICK ---
+// --- FLOATING JOYSTICK ---
+this.joyBase = this.add.circle(0, 0, 60, 0x000000, 0.3)
+    .setScrollFactor(0)
+    .setDepth(1000)
+    .setVisible(false);
+
+this.joyStick = this.add.circle(0, 0, 30, 0xffffff, 0.6)
+    .setScrollFactor(0)
+    .setDepth(1001)
+    .setVisible(false);
+
+this.joyData = {
+    active: false,
+    forceX: 0,
+    forceY: 0,
+    max: 50
+};
 
     this.cursors = this.input.keyboard.addKeys("W,S,A,D,F");
 
@@ -81,7 +108,71 @@ function create() {
     this.circles = new Map();
     this.zones = new Map();
 
-    // --- PLAYER SYNC ---
+    // ---- FLOATING JOYSTICK INPUT ----
+this.input.on("pointerdown", pointer => {
+    // Save for tap detection
+    this.tapStart = { x: pointer.x, y: pointer.y };
+
+    // Floating joystick
+    this.joyBase.setPosition(pointer.x, pointer.y).setVisible(true);
+    this.joyStick.setPosition(pointer.x, pointer.y).setVisible(true);
+
+    this.joyData.active = true;
+    this.joyData.startX = pointer.x;
+    this.joyData.startY = pointer.y;
+});
+this.input.on("pointermove", pointer => {
+    if (!this.joyData.active) return;
+
+    const dx = pointer.x - this.joyData.startX;
+    const dy = pointer.y - this.joyData.startY;
+    const dist = Math.hypot(dx, dy);
+    const max = this.joyData.max;
+
+    if (dist > max) {
+        const a = Math.atan2(dy, dx);
+        this.joyStick.x = this.joyData.startX + Math.cos(a) * max;
+        this.joyStick.y = this.joyData.startY + Math.sin(a) * max;
+    } else {
+        this.joyStick.x = pointer.x;
+        this.joyStick.y = pointer.y;
+    }
+
+    this.joyData.forceX = (this.joyStick.x - this.joyData.startX) / max;
+    this.joyData.forceY = (this.joyStick.y - this.joyData.startY) / max;
+});
+
+this.input.on("pointerup", pointer => {
+    // --- joystick release ---
+    this.joyBase.setVisible(false);
+    this.joyStick.setVisible(false);
+
+    this.joyData.active = false;
+    this.joyData.forceX = 0;
+    this.joyData.forceY = 0;
+
+    // --- double tap grab ---
+    if (!this.tapStart) return;
+
+    const dx = pointer.x - this.tapStart.x;
+    const dy = pointer.y - this.tapStart.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < 20) {
+        const now = Date.now();
+
+        if (now - this.lastTapTime < 300) {
+            socket.emit("toggleGrab");
+            this.lastTapTime = 0;
+        } else {
+            this.lastTapTime = now;
+        }
+    }
+
+    this.tapStart = null;
+});
+
+    // --- creating ---
     socket.on("currentPlayers", players => {
         Object.values(players).forEach(p => {
             if (p.playerId === socket.id) addPlayer(self, p);
@@ -90,77 +181,149 @@ function create() {
     });
 
     socket.on("newPlayer", p => addOtherPlayers(self, p));
+    socket.on("spawnZones", zonesData => {
+    matchStartTime = Date.now();
+    zonesData.forEach(z => {
+        // Create the Zone Circle
+        const zone = self.add.circle(
+            self.centerX + z.x * self.arenaRadius, 
+            self.centerY + z.y * self.arenaRadius, 
+            z.r * self.arenaRadius, 
+            z.color, 
+            0.3
+        );
 
-    socket.on("playerMoved", p => {
-    self.otherPlayers.getChildren().forEach(o => {
-        if (o.playerId === p.playerId) {
-            // Update player position
-            o.setPosition(
-                self.centerX + p.x * self.arenaRadius,
-                self.centerY + p.y * self.arenaRadius
+        zone.id = z.id;
+        zone.relX = z.x;
+        zone.relY = z.y;
+        zone.relR = z.r;
+
+        // 1. ADD PLAYER NAME ABOVE ZONE
+        // We position it slightly above the center of the zone
+        zone.nameLabel = self.add.text(zone.x, zone.y - (z.r * self.arenaRadius * 0.4), z.ownerName || "Goal", {
+            fontSize: `${z.r * self.arenaRadius * 0.25}px`,
+            color: "#ffffff",
+            fontStyle: "bold",
+            stroke: "#000",
+            strokeThickness: 2
+        }).setOrigin(0.5);
+
+        // 2. EXISTING COUNT TEXT
+        zone.countText = self.add.text(zone.x, zone.y, z.count || 0, { 
+            fontSize: `${z.r * self.arenaRadius * 0.6}px`, 
+            color: "#fff" 
+        }).setOrigin(0.5);
+
+        self.zones.set(z.id, zone);
+    });
+});
+    socket.on("spawnCircles", circlesData => {
+        const size = self.arenaRadius * 0.04;
+
+        circlesData.forEach(d => {
+            const c = self.add.circle(
+                self.centerX + d.x * self.arenaRadius, 
+                self.centerY + d.y * self.arenaRadius, 
+                size, 
+                0xffffff
             );
 
-            // If this player is holding a bottle, move it along
-            if (p.holding) {
-                const c = self.circles.get(p.holding);
-                if (c) {
-                    c.setPosition(
-                        self.centerX + p.x * self.arenaRadius,
-                        self.centerY + p.y * self.arenaRadius
-                    );
-                }
+            c.id = d.id;
+            c.relX = d.x;
+            c.relY = d.y;
+
+            self.circles.set(d.id, c);
+        });
+    });
+    function addPlayer(self, p) {
+    const body = self.add.rectangle(
+        self.centerX + p.x * self.arenaRadius,
+        self.centerY + p.y * self.arenaRadius,
+        self.playerSize,
+        self.playerSize,
+        p.color
+    );
+
+    const nameText = self.add.text(body.x, body.y - self.playerSize, p.name, {
+        fontSize: "16px",
+        color: "#fff",
+        stroke: "#000",
+        strokeThickness: 3
+    }).setOrigin(0.5);
+
+    self.physics.add.existing(body);
+
+    self.container = body;
+    self.nameText = nameText;
+
+    self.player = { playerId: p.playerId, holding: null };
+}
+
+    function addOtherPlayers(self, p) {
+    const body = self.add.rectangle(
+        self.centerX + p.x * self.arenaRadius,
+        self.centerY + p.y * self.arenaRadius,
+        self.playerSize,
+        self.playerSize,
+        p.color
+    );
+
+    const nameText = self.add.text(body.x, body.y - self.playerSize, p.name, {
+        fontSize: "16px",
+        color: "#fff",
+        stroke: "#000",
+        strokeThickness: 3
+    }).setOrigin(0.5);
+
+    body.playerId = p.playerId;
+    body.nameText = nameText;
+
+    self.otherPlayers.add(body);
+    self.physics.add.existing(body);
+}
+    
+    // --- other player server broadcastings ---
+
+    socket.on("playerMoved", p => {
+        self.otherPlayers.getChildren().forEach(o => {
+            if (o.playerId === p.playerId) {
+                o.setPosition(
+                    self.centerX + p.x * self.arenaRadius,
+                    self.centerY + p.y * self.arenaRadius,
+                    o.nameText.setPosition(o.x, o.y - self.playerSize)
+                );
+            }
+        });
+
+        // --- move held bottle ---
+        if (p.holding) {
+            const c = self.circles.get(p.holding);
+            if (c) {
+                const x = self.centerX + p.x * self.arenaRadius;
+                const y = self.centerY + p.y * self.arenaRadius;
+
+                c.setPosition(x, y);
+
+                // IMPORTANT: keep relative synced
+                c.relX = p.x;
+                c.relY = p.y;
             }
         }
     });
-});
-
-
-    // --- CIRCLES ---
-    socket.on("spawnCircles", circlesData => {
-        const size = self.arenaRadius * 0.04;
-        circlesData.forEach(d => {
-            if (!self.circles.has(d.id)) {
-                const c = self.add.circle(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius, size, 0xffffff);
-                c.id = d.id;
-                self.circles.set(d.id, c);
-            }
-        });
-    });
 
     socket.on("circleGrabbed", d => {
-    const c = self.circles.get(d.circleId);
-    if (c) c.owner = d.playerId;
+        const c = self.circles.get(d.circleId);
+        if (c) c.owner = d.playerId;
+        if (d.playerId === socket.id) self.player.holding = d.circleId;
+    });
 
-    // Update local holding if it's me
-    if (d.playerId === self.socket.id) {
-        self.player.holding = d.circleId;
-    }
-});
-
-socket.on("circleDropped", d => {
-    const c = self.circles.get(d.circleId);
-    if (c) {
-        c.owner = null;
-        c.setPosition(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius);
-    }
-
-    // Clear local holding if I dropped it
-    if (d.playerId === self.socket.id) {
-        self.player.holding = null;
-    }
-});
-
-
-    // --- ZONES ---
-    socket.on("spawnZones", zonesData => {
-        zonesData.forEach(z => {
-            if (!self.zones.has(z.id)) {
-                const zone = self.add.circle(self.centerX + z.x * self.arenaRadius, self.centerY + z.y * self.arenaRadius, z.r * self.arenaRadius, z.color, 0.3);
-                zone.id = z.id;
-                zone.countText = self.add.text(zone.x, zone.y, z.count || 0, { fontSize: `${z.r * self.arenaRadius * 0.6}px`, color: "#fff" }).setOrigin(0.5);
-                self.zones.set(z.id, zone);
-            }
-        });
+    socket.on("circleDropped", d => {
+        const c = self.circles.get(d.circleId);
+        if (c) {
+            c.owner = null;
+            c.setPosition(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius);
+        }
+        if(self.player.holding === d.circleId) self.player.holding = null;
     });
 
     socket.on("zoneUpdated", d => {
@@ -168,9 +331,35 @@ socket.on("circleDropped", d => {
         if (z) z.countText.setText(d.count);
     });
 
-    socket.on("gameOver", d => showEndUI(d.winner));
+    socket.on("gameOver", d => {
+    const duration = Math.floor((Date.now() - matchStartTime) / 1000);
 
-    socket.emit("joinGame", { numPlayers, roomName: roomName || null });
+    // Assuming d.winner is the playerName string sent from your server
+    matchHistory.push({
+        winner: d.winner,
+        time: duration
+    });
+
+    winCounts[d.winner] = (winCounts[d.winner] || 0) + 1;
+
+    // Call the UI function
+    showEndUI(d.winner, duration);
+});
+
+
+
+    socket.on("rematchRequested", data => {
+        const btn = document.getElementById("rematchbtn");
+        if (!btn) return;
+
+        btn.innerText = `Rematch (${data.count})`;
+    });
+    socket.on("rematchStart", () => {
+        hideGameOverUI();
+        resetLocalGame.call(self);
+    });
+
+    socket.emit("joinGame", { numPlayers, roomName: roomName || null, playerName: playerName });
 }
 
 function update() {
@@ -178,22 +367,26 @@ function update() {
 
     const speed = this.playerSpeed;
     let moved = false;
-    // Inside update(), after moving this.container
-if (this.player.holding) {
-    const c = this.circles.get(this.player.holding);
-    if (c) {
-        c.setPosition(this.container.x, this.container.y);
+    if (this.player.holding)
+    {
+        const c = this.circles.get(this.player.holding);
+        if (c) {
+            c.setPosition(this.container.x, this.container.y);
+        }
+
     }
+if (this.nameText) {
+    this.nameText.setPosition(this.container.x, this.container.y - this.playerSize);
 }
-
-
     // --- TOUCH MOVE ---
-    if (this.input.pointer1.isDown && this.touchStart) {
-        const dx = this.input.pointer1.x - this.touchStart.x;
-        const dy = this.input.pointer1.y - this.touchStart.y;
-        const len = Math.hypot(dx, dy);
-        if (len > 10) { this.container.x += (dx / len) * speed; this.container.y += (dy / len) * speed; moved = true; }
-    }
+    const fx = this.joyData.forceX;
+const fy = this.joyData.forceY;
+
+if (Math.abs(fx) > 0.01 || Math.abs(fy) > 0.01) {
+    this.container.x += fx * this.playerSpeed;
+    this.container.y += fy * this.playerSpeed;
+    moved = true;
+}
 
     // --- KEYBOARD MOVE ---
     if (this.cursors.A.isDown) { this.container.x -= speed; moved = true; }
@@ -201,7 +394,7 @@ if (this.player.holding) {
     if (this.cursors.W.isDown) { this.container.y -= speed; moved = true; }
     if (this.cursors.S.isDown) { this.container.y += speed; moved = true; }
 
-    // --- CLAMP TO ARENA ---
+    // --- LIMIT TO ARENA ---
     const dx = this.container.x - this.centerX;
     const dy = this.container.y - this.centerY;
     const dist = Math.hypot(dx, dy);
@@ -215,29 +408,68 @@ if (this.player.holding) {
     if (moved) socket.emit("playerMovement", { x: (this.container.x - this.centerX) / this.arenaRadius, y: (this.container.y - this.centerY) / this.arenaRadius });
 
     // --- GRAB ---
-    if (Phaser.Input.Keyboard.JustDown(this.cursors.F)) socket.emit("toggleGrab");
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.F))
+    {
+        socket.emit("toggleGrab");
+    }
     // Server sends updated circle positions
 
 }
+function resetLocalGame() {
+    matchStartTime = Date.now();
+    // reset player
+    if (this.container) {
+        this.container.setPosition(this.centerX, this.centerY);
+    }
+    if (this.player) {
+        this.player.holding = null;
+    }
 
-function addPlayer(self, p) {
-    self.container = self.add.rectangle(self.centerX + p.x * self.arenaRadius, self.centerY + p.y * self.arenaRadius, self.playerSize, self.playerSize, p.color);
-    self.physics.add.existing(self.container);
+    // destroy circles
+    this.circles.forEach(c => c.destroy());
+    this.circles.clear();
+
+    // destroy zones
+    this.zones.forEach(z => {
+        z.destroy();
+        z.countText.destroy();
+    });
+    this.zones.clear();
 }
-
-function addOtherPlayers(self, p) {
-    const o = self.add.rectangle(self.centerX + p.x * self.arenaRadius, self.centerY + p.y * self.arenaRadius, self.playerSize, self.playerSize, p.color);
-    o.playerId = p.playerId;
-    self.otherPlayers.add(o);
-    self.physics.add.existing(o);
-}
-
-function showEndUI(winner) {
+function showEndUI(winner, duration) {
     document.getElementById("endUI").style.display = "flex";
-    document.getElementById("winnerText").innerText = "Winner: " + winner;
+    document.getElementById("winnerText").innerText = `Winner: ${winner}`;
+
+    let html = `<h3>Scoreboard</h3>`;
+
+    for (let p in winCounts) {
+        html += `<div>🏆 ${p}: ${winCounts[p]} wins</div>`;
+    }
+
+    html += `<hr><h3>Match History</h3>`;
+
+    matchHistory.forEach((m, i) => {
+        html += `<div>#${i + 1} — ${m.winner} — ${m.time}s</div>`;
+    });
+
+    document.getElementById("statsBox").innerHTML = html;
+}
+function hideGameOverUI() {
+    document.getElementById("endUI").style.display = "none";
+    document.getElementById("winnerText").innerText = "";
+    const btn = document.getElementById("rematchbtn");
+    btn.disabled = false;
+    btn.innerText = "Rematch";
 }
 
-function playAgain() { socket.emit("requestRematch"); }
+function playAgain() {
+    const btn = document.getElementById("rematchbtn");
+
+    socket.emit("requestRematch");
+    // disable after clicking
+    btn.disabled = true;
+    btn.innerText = "Waiting...";
+}
 function goHome() { socket.emit("leaveRoom"); window.location.href = "/index.html"; }
 </script>
 </body>

@@ -8,112 +8,184 @@
   <script src="/socket.io/socket.io.js"></script>
 
   <style>
-    body {
-      background: #111;
-      color: white;
-      font-family: Arial;
-      text-align: center;
-    }
+body {
+  background: radial-gradient(circle at top, #1a1a1a, #000);
+  color: white;
+  font-family: Arial;
+  text-align: center;
+}
 
-    .panel {
-      margin-top: 80px;
-    }
+h2 {
+  margin-top: 30px;
+  letter-spacing: 1px;
+}
 
-    button, select, input {
-      padding: 10px;
-      margin: 6px;
-      border-radius: 6px;
-      border: none;
-      font-size: 16px;
-    }
+.panel {
+  margin: 30px auto;
+  padding: 25px;
+  width: 320px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 14px;
+  box-shadow: 0 0 20px rgba(0,0,0,0.6);
+}
 
-    button {
-      background: #3fa9f5;
-      color: white;
-      cursor: pointer;
-    }
+.rules {
+  width: 420px;
+  margin: 30px auto;
+  padding: 25px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 14px;
+  text-align: left;
+}
 
-    input {
-      width: 180px;
-    }
-  </style>
+.rules h3 {
+  text-align: center;
+}
+
+.rules li {
+  margin: 10px 0;
+}
+
+button, select, input {
+  padding: 10px;
+  margin: 6px;
+  border-radius: 6px;
+  border: none;
+  font-size: 16px;
+}
+
+button {
+  background: linear-gradient(135deg,#3fa9f5,#2b7cd3);
+  color: white;
+  cursor: pointer;
+}
+
+input {
+  width: 200px;
+  text-align: center;
+}
+</style>
 </head>
 
 <body>
-  <h2>Bottle Arena Multiplayer</h2>
+<h2>🍾 Bottle Arena Multiplayer</h2>
 
-  <div class="panel">
-    <h3>Create Room</h3>
+<div class="panel">
+  <h3>Player Name</h3>
+  <input id="playerName" placeholder="Enter your name">
+</div>
 
-    <select id="createCapacity">
-      <option value="3">3 Players</option>
-      <option value="4">4 Players</option>
-      <option value="5">5 Players</option>
-    </select>
+<div class="rules">
+  <h3>📜 How To Play</h3>
+  <ul>
+    <li>🎮 Move using joystick or WASD keys.</li>
+    <li>🤲 Double tap (mobile) or press <b>F</b> to grab a bottle.</li>
+    <li>📦 Carry bottles to your colored zone.</li>
+    <li>🎯 Drop them inside your zone to score.</li>
+    <li>🏆 First player to fill their zone wins.</li>
+  </ul>
+</div>
 
-    <select id="createPrivate">
-      <option value="false">Public</option>
-      <option value="true">Private</option>
-    </select>
+<div class="panel">
+  <h3>Create Room</h3>
 
-    <br>
-    <button onclick="createRoom()">Create Room</button>
+  <select id="createCapacity">
+    <option value="3">3 Players</option>
+    <option value="4">4 Players</option>
+    <option value="5">5 Players</option>
+  </select>
 
-    <p id="createdRoom"></p>
-  </div>
+  <select id="createPrivate">
+    <option value="false">Public</option>
+    <option value="true">Private</option>
+  </select>
 
-  <hr style="width:40%; margin:40px auto;">
+  <br>
+  <button onclick="createRoom()">Create Room</button>
 
-  <div class="panel">
-    <h3>Join Game</h3>
-
-    <select id="joinCapacity">
-      <option value="3">3 Players</option>
-      <option value="4">4 Players</option>
-      <option value="5">5 Players</option>
-    </select>
-
+  <div id="createdRoomContainer" style="display:none; margin-top:10px;">
+    <p>Room created! Share this code with friends:</p>
+    <input id="createdRoom" readonly style="width:120px; text-align:center;">
+    <button onclick="copyRoomCode()">Copy</button>
     <br><br>
-
-    <input id="joinRoomName" placeholder="Room code (optional)">
-    <br><br>
-
-    <button onclick="joinGame()">Join Game</button>
-
-    <p id="joinStatus"></p>
+    <button onclick="enterRoom()">Enter Room</button>
   </div>
+</div>
+
+<hr style="width:40%; margin:40px auto; opacity:0.2;">
+
+<div class="panel">
+  <h3>Join Game</h3>
+
+  <select id="joinCapacity">
+    <option value="3">3 Players</option>
+    <option value="4">4 Players</option>
+    <option value="5">5 Players</option>
+  </select>
+
+  <br><br>
+
+  <input id="joinRoomName" placeholder="Room code (optional)">
+  <br><br>
+
+  <button onclick="joinGame()">Join Game</button>
+
+  <p id="joinStatus"></p>
+</div>
 
   <script>
   const socket = io();
 
   function createRoom() {
-    const numPlayers = parseInt(document.getElementById('createCapacity').value);
-    const isPrivate = document.getElementById('createPrivate').value === "true";
+  const numPlayers = parseInt(document.getElementById('createCapacity').value);
+  const isPrivate = document.getElementById('createPrivate').value === "true";
+  const name = document.getElementById("playerName").value || "Player";
 
-    socket.emit('createRoom', { numPlayers, private: isPrivate });
-  }
+  sessionStorage.setItem("playerName", name);
+  socket.emit('createRoom', { numPlayers, private: isPrivate });
+}
 
-  socket.on('roomCreated', (roomName) => {
-    document.getElementById('createdRoom').innerText = "Room created: " + roomName;
+socket.on('roomCreated', (roomName) => {
+  // Show the room code and copy button instead of redirecting immediately
+  const container = document.getElementById('createdRoomContainer');
+  const input = document.getElementById('createdRoom');
 
-    const numPlayers = parseInt(document.getElementById('createCapacity').value);
+  input.value = roomName;
+  container.style.display = 'block';
 
-    sessionStorage.setItem("roomName", roomName);
-    sessionStorage.setItem("numPlayers", numPlayers);
+  // Save in sessionStorage for when entering the game
+  sessionStorage.setItem("roomName", roomName);
+  sessionStorage.setItem("numPlayers", parseInt(document.getElementById('createCapacity').value));
 
-    window.location.href = "/game.html";
-  });
+  // ⚠️ REMOVE this line:
+  // window.location.href = "/game.html";
+});
 
-  function joinGame() {
-    const numPlayers = parseInt(document.getElementById('joinCapacity').value);
-    const roomName = document.getElementById('joinRoomName').value.trim();
+// Copy to clipboard
+function copyRoomCode() {
+  const input = document.getElementById('createdRoom');
+  input.select();
+  input.setSelectionRange(0, 99999);
+  document.execCommand("copy");
+  alert("Room code copied!");
+}
 
-    sessionStorage.setItem("roomName", roomName || "");
-    sessionStorage.setItem("numPlayers", numPlayers);
+// Only enter game when user is ready
+function enterRoom() {
+  window.location.href = "/game.html";
+}
 
-    window.location.href = "/game.html";
-  }
+function joinGame() {
+  const numPlayers = parseInt(document.getElementById('joinCapacity').value);
+  const roomName = document.getElementById('joinRoomName').value.trim();
+  const name = document.getElementById("playerName").value || "Player";
 
+  sessionStorage.setItem("playerName", name);
+  sessionStorage.setItem("roomName", roomName || "");
+  sessionStorage.setItem("numPlayers", numPlayers);
+
+  window.location.href = "/game.html";
+}
   socket.on('roomFull', () => {
     document.getElementById('joinStatus').innerText = "Room is full!";
   });

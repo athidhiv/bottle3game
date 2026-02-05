@@ -20,7 +20,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('joinGame', (data) => {
-        joinLobby(socket, data.numPlayers, data.roomName);
+        joinLobby(socket, data.numPlayers, data.roomName,data.playerName);
     });
     socket.on("leaveRoom", () => {
         const player = players[socket.id];
@@ -54,7 +54,7 @@ function createRoom(num, isPrivate) {
     return roomName;
 }
 
-function joinLobby(socket, num, roomName) {
+function joinLobby(socket, num, roomName, playerName) {
     if (!roomName) {
         for (let id in rooms) {
             let r = rooms[id];
@@ -77,6 +77,7 @@ function joinLobby(socket, num, roomName) {
         x: 0,
         y: 0,
         playerId: socket.id,
+        playerName: playerName || "Anonymous"+socket.id.slice(0,4),
         color: Math.random() * 0xffffff,
         room: roomName,
         holding: null
@@ -125,7 +126,8 @@ function tryStartGame(roomName) {
                 id: pId,
                 x: Math.cos(a) * zRing,
                 y: Math.sin(a) * zRing,
-                r: 0.12,
+                r: 0.17,
+                ownerName: players[pId].playerName,
                 count: 0,
                 color: players[pId].color
             };
@@ -162,6 +164,7 @@ function registerGameHandlers(socket) {
             circle.owner = null;
             circle.x = player.x;
             circle.y = player.y;
+            players[socket.id].holding = null;
 
             io.to(player.room).emit("circleDropped", {
                 circleId: circle.id,
@@ -180,12 +183,12 @@ function registerGameHandlers(socket) {
                     });
 
                     if (z.count >= room.capacity) {
-                        io.to(player.room).emit("gameOver", { winner: z.id });
+                        io.to(player.room).emit("gameOver", { winner: z.ownerName, winnerId: z.id });
                     }
                 }
             }
 
-            player.holding = null;
+            
             return;
         }
 
@@ -196,7 +199,7 @@ function registerGameHandlers(socket) {
             if (!c.owner && Math.hypot(c.x - player.x, c.y - player.y) < PLAYER_GRAB_DIST) {
                 c.owner = socket.id;
                 player.holding = id;
-
+                players[socket.id].holding = id;
                 io.to(player.room).emit("circleGrabbed", {
                     circleId: id,
                     playerId: socket.id
@@ -216,6 +219,49 @@ function registerGameHandlers(socket) {
 
                 break;
             }
+        }
+    });
+    socket.on("requestRematch", () => {
+
+        const player = players[socket.id];
+        if (!player) return;
+
+        const room = rooms[player.room];
+        if (!room) return;
+
+        // Use Set instead of counter
+        room.rematchVotes.add(socket.id);
+
+        io.to(player.room).emit("rematchRequested", { 
+            count: room.rematchVotes.size 
+        });
+
+        // Everyone agreed
+        if (room.rematchVotes.size >= room.capacity) {
+            console.log("All players agreed. Restarting game...");
+
+            // ---- RESET ROOM ----
+            room.started = false;
+            room.rematchVotes.clear();
+            room.circles = {};
+            room.zones = {};
+
+            // ---- RESET PLAYERS ----
+            room.playerIds.forEach(id => {
+                if (players[id]) {
+                    players[id].holding = null;
+                    players[id].x = 0;
+                    players[id].y = 0;
+                }
+            });
+
+            // ---- NOTIFY CLIENT ----
+            io.to(player.room).emit("rematchStart");
+            setTimeout(() => {
+                tryStartGame(player.room);
+            }, 100);
+            // ---- START AGAIN ----
+            tryStartGame(player.room);
         }
     });
      socket.on('disconnect', () => {
