@@ -37,8 +37,11 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+function preload() {
+    
+    this.load.image("egg", "/assets/gold_egg.png");
+}
 
-function preload() {}
 
 function create() {
     const self = this;
@@ -73,10 +76,14 @@ function create() {
             zone.countText.setPosition(zone.x, zone.y).setFontSize(zone.relR * this.arenaRadius * 0.6);
         });
 
-        // Update circles
+        /// Update circles (SIZE ONLY)
         this.circles.forEach(c => {
+            const size = this.arenaRadius * 0.08;
+            c.baseSize = size;
+            c.setDisplaySize(size, size);
+            
+            // Add this line:
             c.setPosition(this.centerX + c.relX * this.arenaRadius, this.centerY + c.relY * this.arenaRadius);
-            c.setRadius(this.arenaRadius * 0.04);
         });
     });
 
@@ -220,23 +227,35 @@ this.input.on("pointerup", pointer => {
     });
 });
     socket.on("spawnCircles", circlesData => {
-        const size = self.arenaRadius * 0.04;
+    const size = self.arenaRadius * 0.04;
 
-        circlesData.forEach(d => {
-            const c = self.add.circle(
-                self.centerX + d.x * self.arenaRadius, 
-                self.centerY + d.y * self.arenaRadius, 
-                size, 
-                0xffffff
-            );
+    circlesData.forEach(d => {
+        const c = self.add.image(
+            self.centerX + d.x * self.arenaRadius,
+            self.centerY + d.y * self.arenaRadius,
+            "egg"
+        );
 
-            c.id = d.id;
-            c.relX = d.x;
-            c.relY = d.y;
+        c.baseSize = size * 2;
+        c.setDisplaySize(c.baseSize, c.baseSize);
+        c.setOrigin(0.5);
 
-            self.circles.set(d.id, c);
+        c.id = d.id;
+        c.relX = d.x;
+        c.relY = d.y;
+
+        c.floatTween = self.tweens.add({
+            targets: c,
+            props: {
+                y: { value: "-=4", duration: 600 }
+            },
+            yoyo: true,
+            repeat: -1
         });
+
+        self.circles.set(d.id, c);
     });
+});
     function addPlayer(self, p) {
     const body = self.add.rectangle(
         self.centerX + p.x * self.arenaRadius,
@@ -310,19 +329,48 @@ this.input.on("pointerup", pointer => {
         });
 
         if (d.playerId === socket.id) self.player.holding = d.circleId;
+        if (c && c.floatTween) c.floatTween.pause();
+        if (c && c.floatTween) {
+            c.floatTween.stop();
+            c.floatTween = null;
+        }
     });
 
-    socket.on("circleDropped", d => {
-        const c = self.circles.get(d.circleId);
-        if (c) {
-            c.owner = null;
-            c.setPosition(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius);
-        }
-        if(self.player.holding === d.circleId) self.player.holding = null;
-        self.otherPlayers.getChildren().forEach(o => {
-            if (o.holding === d.circleId) o.holding = null;
-        });
+   socket.on("circleDropped", d => {
+    const c = self.circles.get(d.circleId);
+    if (!c) return;
+
+    // 1. CRITICAL: Break the link immediately so update() stops moving it
+    if (self.player.holding === d.circleId) {
+        self.player.holding = null;
+    }
+
+    // Also clear it for other players
+    self.otherPlayers.getChildren().forEach(o => {
+        if (o.holding === d.circleId) o.holding = null;
     });
+
+    c.owner = null;
+    c.relX = d.x;
+    c.relY = d.y;
+
+    const worldX = self.centerX + d.x * self.arenaRadius;
+    const worldY = self.centerY + d.y * self.arenaRadius;
+
+    // 2. Kill the old tween and set position
+    if (c.floatTween) c.floatTween.stop(); 
+    c.setPosition(worldX, worldY);
+    c.setDisplaySize(c.baseSize, c.baseSize);
+
+    // 3. Start a fresh tween at the new location
+    c.floatTween = self.tweens.add({
+        targets: c,
+        y: "-=4",
+        duration: 600,
+        yoyo: true,
+        repeat: -1
+    });
+});
 
     socket.on("zoneUpdated", d => {
         const z = self.zones.get(d.zoneId);
@@ -365,13 +413,21 @@ function update() {
 
     const speed = this.playerSpeed;
     let moved = false;
-    if (this.player.holding)
-    {
+    if (this.player.holding) {
         const c = this.circles.get(this.player.holding);
         if (c) {
-            c.setPosition(this.container.x, this.container.y);
-        }
+            const holdOffset = this.playerSize * 0.6;
 
+            const tx = this.container.x;
+            const ty = this.container.y - holdOffset;
+
+            c.x += (tx - c.x) * 0.6;
+            c.y += (ty - c.y) * 0.6;
+            c.lastX = c.x;
+            c.lastY = c.y;
+
+            c.setDisplaySize(c.baseSize * 1.1, c.baseSize * 1.1);
+        }
     }
     if (this.nameText) {
         this.nameText.setPosition(this.container.x, this.container.y - this.playerSize);
@@ -387,9 +443,13 @@ function update() {
     if (o.holding) {
         const c = this.circles.get(o.holding);
         if (c) {
-            c.x += (o.x - c.x) * 0.4;
-            c.y += (o.y - c.y) * 0.4;
-        }
+            const holdOffset = this.playerSize * 0.6;
+            const tx = o.x;
+            const ty = o.y - holdOffset;
+
+            c.x += (tx - c.x) * 0.6;
+            c.y += (ty - c.y) * 0.6;
+                    }
     }
 });
     // --- TOUCH MOVE ---
