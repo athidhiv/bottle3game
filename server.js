@@ -141,13 +141,10 @@ function tryStartGame(roomName) {
 
 function registerGameHandlers(socket) {
     socket.on('playerMovement', (data) => {
-        if (players[socket.id]) 
-        {
-            players[socket.id].x = data.x;
-            players[socket.id].y = data.y;
-            socket.to(players[socket.id].room).emit('playerMoved', players[socket.id]);
-        }
-    });      
+        if (!players[socket.id]) return;
+        players[socket.id].x = data.x;
+        players[socket.id].y = data.y;
+    });
     
     socket.on("toggleGrab", () => {
         const player = players[socket.id];
@@ -277,5 +274,22 @@ function registerGameHandlers(socket) {
             }
         });
     }
+setInterval(() => {
+    for (let roomName in rooms) {
+        const room = rooms[roomName];
+
+        const snapshot = room.playerIds.map(id => {
+            const p = players[id];
+            return { 
+                id, 
+                x: p.x, 
+                y: p.y, 
+                holding: p.holding 
+            };
+        });
+
+        io.to(roomName).emit("stateUpdate", snapshot);
+    }
+}, 50); // 20Hz
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

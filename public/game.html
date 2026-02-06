@@ -21,6 +21,8 @@ const playerName = sessionStorage.getItem("playerName");
 let matchStartTime = 0;
 let matchHistory = [];
 let winCounts = {};
+let lastSend = 0;
+const SEND_RATE = 50; // ms → 20 times/sec
 const config = {
     type: Phaser.AUTO,
     scale: {
@@ -267,7 +269,9 @@ this.input.on("pointerup", pointer => {
         self.playerSize,
         p.color
     );
-
+    body.targetX = body.x;
+    body.targetY = body.y;
+    body.holding = null;
     const nameText = self.add.text(body.x, body.y - self.playerSize, p.name, {
         fontSize: "16px",
         color: "#fff",
@@ -284,36 +288,27 @@ this.input.on("pointerup", pointer => {
     
     // --- other player server broadcastings ---
 
-    socket.on("playerMoved", p => {
-        self.otherPlayers.getChildren().forEach(o => {
-            if (o.playerId === p.playerId) {
-                o.setPosition(
-                    self.centerX + p.x * self.arenaRadius,
-                    self.centerY + p.y * self.arenaRadius,
-                    o.nameText.setPosition(o.x, o.y - self.playerSize)
-                );
-            }
-        });
+    socket.on("stateUpdate", list => {
+    list.forEach(p => {
+        if (p.id === socket.id) return;
 
-        // --- move held bottle ---
-        if (p.holding) {
-            const c = self.circles.get(p.holding);
-            if (c) {
-                const x = self.centerX + p.x * self.arenaRadius;
-                const y = self.centerY + p.y * self.arenaRadius;
+        const o = self.otherPlayers.getChildren().find(x => x.playerId === p.id);
+        if (!o) return;
 
-                c.setPosition(x, y);
-
-                // IMPORTANT: keep relative synced
-                c.relX = p.x;
-                c.relY = p.y;
-            }
-        }
+        o.targetX = self.centerX + p.x * self.arenaRadius;
+        o.targetY = self.centerY + p.y * self.arenaRadius;
+        o.holding = p.holding;
     });
+});
 
     socket.on("circleGrabbed", d => {
         const c = self.circles.get(d.circleId);
         if (c) c.owner = d.playerId;
+
+        self.otherPlayers.getChildren().forEach(o => {
+            if (o.playerId === d.playerId) o.holding = d.circleId;
+        });
+
         if (d.playerId === socket.id) self.player.holding = d.circleId;
     });
 
@@ -324,6 +319,9 @@ this.input.on("pointerup", pointer => {
             c.setPosition(self.centerX + d.x * self.arenaRadius, self.centerY + d.y * self.arenaRadius);
         }
         if(self.player.holding === d.circleId) self.player.holding = null;
+        self.otherPlayers.getChildren().forEach(o => {
+            if (o.holding === d.circleId) o.holding = null;
+        });
     });
 
     socket.on("zoneUpdated", d => {
@@ -375,9 +373,25 @@ function update() {
         }
 
     }
-if (this.nameText) {
-    this.nameText.setPosition(this.container.x, this.container.y - this.playerSize);
-}
+    if (this.nameText) {
+        this.nameText.setPosition(this.container.x, this.container.y - this.playerSize);
+    }
+    // --- move held circles for OTHER players ---
+    this.otherPlayers.getChildren().forEach(o => {
+    if (o.targetX !== undefined) {
+        o.x += (o.targetX - o.x) * 0.2;
+        o.y += (o.targetY - o.y) * 0.2;
+        o.nameText.setPosition(o.x, o.y - this.playerSize);
+    }
+
+    if (o.holding) {
+        const c = this.circles.get(o.holding);
+        if (c) {
+            c.x += (o.x - c.x) * 0.4;
+            c.y += (o.y - c.y) * 0.4;
+        }
+    }
+});
     // --- TOUCH MOVE ---
     const fx = this.joyData.forceX;
 const fy = this.joyData.forceY;
@@ -405,8 +419,16 @@ if (Math.abs(fx) > 0.01 || Math.abs(fy) > 0.01) {
     }
 
     // --- SEND MOVE ---
-    if (moved) socket.emit("playerMovement", { x: (this.container.x - this.centerX) / this.arenaRadius, y: (this.container.y - this.centerY) / this.arenaRadius });
-
+    if (moved) {
+        const now = Date.now();
+        if (now - lastSend > SEND_RATE) {
+            socket.emit("playerMovement", { 
+                x: (this.container.x - this.centerX) / this.arenaRadius, 
+                y: (this.container.y - this.centerY) / this.arenaRadius 
+            });
+            lastSend = now;
+        }
+    }
     // --- GRAB ---
     if (Phaser.Input.Keyboard.JustDown(this.cursors.F))
     {
