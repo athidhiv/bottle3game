@@ -40,6 +40,7 @@ const game = new Phaser.Game(config);
 function preload() {
     
     this.load.image("egg", "/assets/gold_egg.png");
+    this.load.image("pink", "/assets/1 Pink_Monster/Pink_Monster_Run_6.png");
 }
 
 
@@ -55,69 +56,24 @@ function create() {
     this.arena = this.add.circle(this.centerX, this.centerY, this.arenaRadius, 0x444444, 0.15)
         .setStrokeStyle(4, 0xffffff, 0.4);
 
-    this.playerSize = this.arenaRadius * 0.09;
-    this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.004;
+            this.playerSize = this.arenaRadius * 0.09;
+            this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.004;
+            this.joyBase = this.add.circle(0, 0, 60, 0x000000, 0.3)
+            .setScrollFactor(0)
+            .setDepth(1000)
+            .setVisible(false);
 
-    // --- RESIZE HANDLER ---
-    this.scale.on("resize", (gameSize) => {
-        this.worldWidth = gameSize.width;
-        this.worldHeight = gameSize.height;
-        this.centerX = this.worldWidth / 2;
-        this.centerY = this.worldHeight / 2;
-        this.arenaRadius = Math.min(this.worldWidth, this.worldHeight) * 0.4;
-        this.arena.setPosition(this.centerX, this.centerY).setRadius(this.arenaRadius);
-        this.playerSize = this.arenaRadius * 0.09;
-        this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.004;
+        this.joyStick = this.add.circle(0, 0, 30, 0xffffff, 0.6)
+            .setScrollFactor(0)
+            .setDepth(1001)
+            .setVisible(false);
 
-        // Update zones
-        this.zones.forEach(zone => {
-            zone.setPosition(this.centerX + zone.relX * this.arenaRadius, this.centerY + zone.relY * this.arenaRadius);
-            zone.setRadius(zone.relR * this.arenaRadius);
-            zone.countText.setPosition(zone.x, zone.y).setFontSize(zone.relR * this.arenaRadius * 0.6);
-        });
-
-        /// Update circles (SIZE ONLY)
-        this.circles.forEach(c => {
-            const size = this.arenaRadius * 0.08;
-            c.baseSize = size;
-            c.setDisplaySize(size, size);
-            
-            // Add this line:
-            c.setPosition(this.centerX + c.relX * this.arenaRadius, this.centerY + c.relY * this.arenaRadius);
-        });
-    });
-
-    // --- INPUT ---
-    // --- JOYSTICK ---
-// --- FLOATING JOYSTICK ---
-this.joyBase = this.add.circle(0, 0, 60, 0x000000, 0.3)
-    .setScrollFactor(0)
-    .setDepth(1000)
-    .setVisible(false);
-
-this.joyStick = this.add.circle(0, 0, 30, 0xffffff, 0.6)
-    .setScrollFactor(0)
-    .setDepth(1001)
-    .setVisible(false);
-
-this.joyData = {
-    active: false,
-    forceX: 0,
-    forceY: 0,
-    max: 50
-};
-
-    this.cursors = this.input.keyboard.addKeys("W,S,A,D,F");
-
-    // --- SOCKET ---
-    this.socket = io();
-    socket = this.socket;
-
-    this.otherPlayers = this.physics.add.group();
-    this.circles = new Map();
-    this.zones = new Map();
-
-    // ---- FLOATING JOYSTICK INPUT ----
+        this.joyData = {
+            active: false,
+            forceX: 0,
+            forceY: 0,
+            max: 50
+        };
 this.input.on("pointerdown", pointer => {
     // Save for tap detection
     this.tapStart = { x: pointer.x, y: pointer.y };
@@ -180,6 +136,46 @@ this.input.on("pointerup", pointer => {
 
     this.tapStart = null;
 });
+
+    // --- RESIZE HANDLER ---
+    this.scale.on("resize", (gameSize) => {
+        this.worldWidth = gameSize.width;
+        this.worldHeight = gameSize.height;
+        this.centerX = this.worldWidth / 2;
+        this.centerY = this.worldHeight / 2;
+        this.arenaRadius = Math.min(this.worldWidth, this.worldHeight) * 0.4;
+        this.arena.setPosition(this.centerX, this.centerY).setRadius(this.arenaRadius);
+        this.playerSize = this.arenaRadius * 0.09;
+        this.playerSpeed = Math.min(this.worldWidth, this.worldHeight) * 0.004;
+
+        // Update zones
+        this.zones.forEach(zone => {
+            zone.setPosition(this.centerX + zone.relX * this.arenaRadius, this.centerY + zone.relY * this.arenaRadius);
+            zone.setRadius(zone.relR * this.arenaRadius);
+            zone.countText.setPosition(zone.x, zone.y).setFontSize(zone.relR * this.arenaRadius * 0.6);
+        });
+
+        /// Update circles (SIZE ONLY)
+        this.circles.forEach(c => {
+            const size = this.arenaRadius * 0.08;
+            c.baseSize = size;
+            c.setDisplaySize(size, size);
+            
+            // Add this line:
+            c.setPosition(this.centerX + c.relX * this.arenaRadius, this.centerY + c.relY * this.arenaRadius);
+        });
+    });
+
+    this.cursors = this.input.keyboard.addKeys("W,S,A,D,F");
+
+    // --- SOCKET ---
+    this.socket = io();
+    socket = this.socket;
+
+    this.otherPlayers = this.physics.add.group();
+    this.circles = new Map();
+    this.zones = new Map();
+
 
     // --- creating ---
     socket.on("currentPlayers", players => {
