@@ -25,18 +25,9 @@ io.on('connection', (socket) => {
     socket.on("leaveRoom", () => {
         const player = players[socket.id];
         if (!player) return;
-
         const roomName = player.room;
-        const room = rooms[roomName];
-
-        if (room) {
-            room.playerIds = room.playerIds.filter(id => id !== socket.id);
-            socket.to(roomName).emit("disconnected", socket.id);
-            if (room.playerIds.length === 0) delete rooms[roomName];
-        }
-
+        handlePlayerCleanup(socket.id);
         socket.leave(roomName);
-        delete players[socket.id];
     });
 });
 
@@ -51,6 +42,13 @@ function createRoom(num, isPrivate) {
         circles: {},
         zones: {}
     };
+    // Auto-cleanup room if nobody joins in 30 seconds
+    setTimeout(() => {
+        if (rooms[roomName] && rooms[roomName].playerIds.length === 0) {
+            delete rooms[roomName];
+            console.log(`Cleaned up empty room due to inactivity: ${roomName}`);
+        }
+    }, 30000);
     return roomName;
 }
 
@@ -257,23 +255,47 @@ function registerGameHandlers(socket) {
             setTimeout(() => {
                 tryStartGame(player.room);
             }, 100);
-            // ---- START AGAIN ----
-            tryStartGame(player.room);
         }
     });
-     socket.on('disconnect', () => {
-            const player = players[socket.id];
-            if (player) {
-                const rName = player.room;
-                if (rooms[rName]) {
-                    rooms[rName].playerIds = rooms[rName].playerIds.filter(id => id !== socket.id);
-                    if (rooms[rName].playerIds.length === 0) delete rooms[rName];
-                }
-                delete players[socket.id];
-                io.to(rName).emit('disconnected', socket.id);
+    socket.on('disconnect', () => {
+        handlePlayerCleanup(socket.id);
+    });
+}
+
+function handlePlayerCleanup(socketId) {
+    const player = players[socketId];
+    if (!player) return;
+
+    const roomName = player.room;
+    const room = rooms[roomName];
+
+    if (room) {
+        // Release held items
+        if (player.holding) {
+            const circle = room.circles[player.holding];
+            if (circle) {
+                circle.owner = null;
+                circle.x = player.x;
+                circle.y = player.y;
+                io.to(roomName).emit("circleDropped", {
+                    circleId: circle.id,
+                    x: circle.x,
+                    y: circle.y
+                });
             }
-        });
+        }
+
+        room.playerIds = room.playerIds.filter(id => id !== socketId);
+        io.to(roomName).emit("disconnected", socketId);
+        
+        if (room.playerIds.length === 0) {
+            delete rooms[roomName];
+            console.log(`Cleaned up room: ${roomName}`);
+        }
     }
+    delete players[socketId];
+}
+
 setInterval(() => {
     for (let roomName in rooms) {
         const room = rooms[roomName];
@@ -292,4 +314,4 @@ setInterval(() => {
     }
 }, 50); // 20Hz
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));

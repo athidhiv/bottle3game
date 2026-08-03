@@ -12,6 +12,7 @@
     <button onclick="goHome()">Back Home</button>
     <p id="rematchCount"></p>
 </div>
+<button id="grabBtn" style="position: fixed; bottom: 30px; right: 30px; width: 80px; height: 80px; border-radius: 50%; background: radial-gradient(circle, #3fa9f5, #2b7cd3); color: white; border: 2px solid white; font-weight: bold; font-size: 16px; z-index: 1000; display: none; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.5); outline: none;">GRAB</button>
 
 <script>
 let socket;
@@ -38,8 +39,11 @@ const config = {
 
 const game = new Phaser.Game(config);
 function preload() {
-    
     this.load.image("egg", "/assets/gold_egg.png");
+    this.load.spritesheet('pink', '/assets/1 Pink_Monster/Run_6.png', {
+        frameWidth: 32,   // change based on your sprite
+        frameHeight: 32  // change based on your sprite
+    });
 }
 
 
@@ -73,68 +77,68 @@ function create() {
             forceY: 0,
             max: 50
         };
-this.input.on("pointerdown", pointer => {
-    // Save for tap detection
-    this.tapStart = { x: pointer.x, y: pointer.y };
+    this.input.on("pointerdown", pointer => {
+        // Save for tap detection
+        this.tapStart = { x: pointer.x, y: pointer.y };
 
-    // Floating joystick
-    this.joyBase.setPosition(pointer.x, pointer.y).setVisible(true);
-    this.joyStick.setPosition(pointer.x, pointer.y).setVisible(true);
+        // Floating joystick
+        this.joyBase.setPosition(pointer.x, pointer.y).setVisible(true);
+        this.joyStick.setPosition(pointer.x, pointer.y).setVisible(true);
 
-    this.joyData.active = true;
-    this.joyData.startX = pointer.x;
-    this.joyData.startY = pointer.y;
-});
-this.input.on("pointermove", pointer => {
-    if (!this.joyData.active) return;
+        this.joyData.active = true;
+        this.joyData.startX = pointer.x;
+        this.joyData.startY = pointer.y;
+    });
+    this.input.on("pointermove", pointer => {
+        if (!this.joyData.active) return;
 
-    const dx = pointer.x - this.joyData.startX;
-    const dy = pointer.y - this.joyData.startY;
-    const dist = Math.hypot(dx, dy);
-    const max = this.joyData.max;
+        const dx = pointer.x - this.joyData.startX;
+        const dy = pointer.y - this.joyData.startY;
+        const dist = Math.hypot(dx, dy);
+        const max = this.joyData.max;
 
-    if (dist > max) {
-        const a = Math.atan2(dy, dx);
-        this.joyStick.x = this.joyData.startX + Math.cos(a) * max;
-        this.joyStick.y = this.joyData.startY + Math.sin(a) * max;
-    } else {
-        this.joyStick.x = pointer.x;
-        this.joyStick.y = pointer.y;
-    }
-
-    this.joyData.forceX = (this.joyStick.x - this.joyData.startX) / max;
-    this.joyData.forceY = (this.joyStick.y - this.joyData.startY) / max;
-});
-
-this.input.on("pointerup", pointer => {
-    // --- joystick release ---
-    this.joyBase.setVisible(false);
-    this.joyStick.setVisible(false);
-
-    this.joyData.active = false;
-    this.joyData.forceX = 0;
-    this.joyData.forceY = 0;
-
-    // --- double tap grab ---
-    if (!this.tapStart) return;
-
-    const dx = pointer.x - this.tapStart.x;
-    const dy = pointer.y - this.tapStart.y;
-    const dist = Math.hypot(dx, dy);
-
-    if (dist < 20) {
-        const now = Date.now();
-
-        if (now - this.lastTapTime < 300) {
-            socket.emit("toggleGrab");
-            this.lastTapTime = 0;
+        if (dist > max) {
+            const a = Math.atan2(dy, dx);
+            this.joyStick.x = this.joyData.startX + Math.cos(a) * max;
+            this.joyStick.y = this.joyData.startY + Math.sin(a) * max;
         } else {
-            this.lastTapTime = now;
+            this.joyStick.x = pointer.x;
+            this.joyStick.y = pointer.y;
         }
-    }
 
-    this.tapStart = null;
-});
+        this.joyData.forceX = (this.joyStick.x - this.joyData.startX) / max;
+        this.joyData.forceY = (this.joyStick.y - this.joyData.startY) / max;
+    });
+
+    this.input.on("pointerup", pointer => {
+        // --- joystick release ---
+        this.joyBase.setVisible(false);
+        this.joyStick.setVisible(false);
+
+        this.joyData.active = false;
+        this.joyData.forceX = 0;
+        this.joyData.forceY = 0;
+
+        // --- double tap grab ---
+        if (!this.tapStart) return;
+
+        const dx = pointer.x - this.tapStart.x;
+        const dy = pointer.y - this.tapStart.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < 20) {
+            const now = Date.now();
+
+            if (now - this.lastTapTime < 300) {
+                socket.emit("toggleGrab");
+                this.lastTapTime = 0;
+            } else {
+                this.lastTapTime = now;
+            }
+        }
+
+        this.tapStart = null;
+    });
 
     // --- RESIZE HANDLER ---
     this.scale.on("resize", (gameSize) => {
@@ -152,6 +156,10 @@ this.input.on("pointerup", pointer => {
             zone.setPosition(this.centerX + zone.relX * this.arenaRadius, this.centerY + zone.relY * this.arenaRadius);
             zone.setRadius(zone.relR * this.arenaRadius);
             zone.countText.setPosition(zone.x, zone.y).setFontSize(zone.relR * this.arenaRadius * 0.6);
+            if (zone.nameLabel) {
+                zone.nameLabel.setPosition(zone.x, zone.y - (zone.relR * this.arenaRadius * 0.4))
+                              .setFontSize(zone.relR * this.arenaRadius * 0.25);
+            }
         });
 
         /// Update circles (SIZE ONLY)
@@ -159,8 +167,6 @@ this.input.on("pointerup", pointer => {
             const size = this.arenaRadius * 0.08;
             c.baseSize = size;
             c.setDisplaySize(size, size);
-            
-            // Add this line:
             c.setPosition(this.centerX + c.relX * this.arenaRadius, this.centerY + c.relY * this.arenaRadius);
         });
     });
@@ -176,7 +182,37 @@ this.input.on("pointerup", pointer => {
     this.zones = new Map();
 
 
+    this.anims.create({
+        key: 'enemy-walk',
+        frames: this.anims.generateFrameNumbers('pink', { start: 0, end: 5 }),
+        frameRate: 10,
+        repeat: -1
+    });
+
+    this.enemy = this.add.sprite(this.centerX + 200, this.centerY, 'pink');
+    this.enemy.setScale(2);
+    this.enemy.play('enemy-walk');
+
+    // enemy movement data
+    this.enemyAngle = 0;
+    this.enemyRadius = this.arenaRadius * 0.5;
+    this.enemySpeed = 0.01;
+
     // --- creating ---
+    // Grab button for touch screens
+    const grabBtn = document.getElementById("grabBtn");
+    if (grabBtn) {
+        grabBtn.addEventListener("pointerdown", (e) => {
+            e.stopPropagation();
+            if (!this.stunned) {
+                socket.emit("toggleGrab");
+            }
+        });
+        if (this.sys.game.device.input.touch) {
+            grabBtn.style.display = "block";
+        }
+    }
+
     socket.on("currentPlayers", players => {
         Object.values(players).forEach(p => {
             if (p.playerId === socket.id) addPlayer(self, p);
@@ -185,6 +221,14 @@ this.input.on("pointerup", pointer => {
     });
 
     socket.on("newPlayer", p => addOtherPlayers(self, p));
+
+    socket.on("disconnected", id => {
+        const o = self.otherPlayers.getChildren().find(x => x.playerId === id);
+        if (o) {
+            if (o.nameText) o.nameText.destroy();
+            o.destroy();
+        }
+    });
     socket.on("spawnZones", zonesData => {
     matchStartTime = Date.now();
     zonesData.forEach(z => {
@@ -251,16 +295,17 @@ this.input.on("pointerup", pointer => {
         self.circles.set(d.id, c);
     });
 });
-    function addPlayer(self, p) {
-    const body = self.add.rectangle(
+function addPlayer(self, p) {
+    const body = self.add.sprite(
         self.centerX + p.x * self.arenaRadius,
         self.centerY + p.y * self.arenaRadius,
-        self.playerSize,
-        self.playerSize,
-        p.color
+        'pink'
     );
+    body.setDisplaySize(self.playerSize * 1.5, self.playerSize * 1.5);
+    body.setTint(p.color);
+    body.play('enemy-walk');
 
-    const nameText = self.add.text(body.x, body.y - self.playerSize, p.name, {
+    const nameText = self.add.text(body.x, body.y - self.playerSize, p.playerName || "Player", {
         fontSize: "16px",
         color: "#fff",
         stroke: "#000",
@@ -275,18 +320,21 @@ this.input.on("pointerup", pointer => {
     self.player = { playerId: p.playerId, holding: null };
 }
 
-    function addOtherPlayers(self, p) {
-    const body = self.add.rectangle(
+function addOtherPlayers(self, p) {
+    const body = self.add.sprite(
         self.centerX + p.x * self.arenaRadius,
         self.centerY + p.y * self.arenaRadius,
-        self.playerSize,
-        self.playerSize,
-        p.color
+        'pink'
     );
+    body.setDisplaySize(self.playerSize * 1.5, self.playerSize * 1.5);
+    body.setTint(p.color);
+    body.play('enemy-walk');
+
     body.targetX = body.x;
     body.targetY = body.y;
     body.holding = null;
-    const nameText = self.add.text(body.x, body.y - self.playerSize, p.name, {
+    
+    const nameText = self.add.text(body.x, body.y - self.playerSize, p.playerName || "Player", {
         fontSize: "16px",
         color: "#fff",
         stroke: "#000",
@@ -399,15 +447,44 @@ this.input.on("pointerup", pointer => {
         hideGameOverUI();
         resetLocalGame.call(self);
     });
+    socket.on("roomNotFound", () => {
+        alert("Room not found! Returning to lobby.");
+        window.location.href = "/index.html";
+    });
+    socket.on("roomFull", () => {
+        alert("Room is full! Returning to lobby.");
+        window.location.href = "/index.html";
+    });
 
     socket.emit("joinGame", { numPlayers, roomName: roomName || null, playerName: playerName });
 }
-
-function update() {
+function update(time, delta) {
     if (!this.container) return;
 
-    const speed = this.playerSpeed;
+    // Normalizing delta to 60fps (16.666 ms per frame)
+    const dt = delta / 16.666;
+    const speed = this.playerSpeed * dt;
     let moved = false;
+
+    // --- ENEMY MOVE ---
+    if (this.enemy) {
+        const lastEx = this.enemy.x;
+        this.enemyAngle += this.enemySpeed * dt;
+
+        const ex = this.centerX + Math.cos(this.enemyAngle) * this.enemyRadius;
+        const ey = this.centerY + Math.sin(this.enemyAngle) * this.enemyRadius;
+
+        this.enemy.setPosition(ex, ey);
+        
+        // Flip based on moving direction
+        if (ex < lastEx) {
+            this.enemy.setFlipX(true);
+        } else if (ex > lastEx) {
+            this.enemy.setFlipX(false);
+        }
+    }
+
+    // Local player held circle interpolation (decay-based ease out)
     if (this.player.holding) {
         const c = this.circles.get(this.player.holding);
         if (c) {
@@ -416,52 +493,104 @@ function update() {
             const tx = this.container.x;
             const ty = this.container.y - holdOffset;
 
-            c.x += (tx - c.x) * 0.6;
-            c.y += (ty - c.y) * 0.6;
+            // Decay-based frame-rate independent interpolation
+            const holdLerpFactor = 1 - Math.pow(1 - 0.6, dt);
+            c.x += (tx - c.x) * holdLerpFactor;
+            c.y += (ty - c.y) * holdLerpFactor;
             c.lastX = c.x;
             c.lastY = c.y;
 
             c.setDisplaySize(c.baseSize * 1.1, c.baseSize * 1.1);
         }
     }
+
     if (this.nameText) {
         this.nameText.setPosition(this.container.x, this.container.y - this.playerSize);
     }
+
     // --- move held circles for OTHER players ---
     this.otherPlayers.getChildren().forEach(o => {
-    if (o.targetX !== undefined) {
-        o.x += (o.targetX - o.x) * 0.2;
-        o.y += (o.targetY - o.y) * 0.2;
-        o.nameText.setPosition(o.x, o.y - this.playerSize);
-    }
+        if (o.targetX !== undefined) {
+            const dx = o.targetX - o.x;
+            const dy = o.targetY - o.y;
+            const dist = Math.hypot(dx, dy);
 
-    if (o.holding) {
-        const c = this.circles.get(o.holding);
-        if (c) {
-            const holdOffset = this.playerSize * 0.6;
-            const tx = o.x;
-            const ty = o.y - holdOffset;
+            // Decay-based interpolation for remote player positions
+            const lerpFactor = 1 - Math.pow(1 - 0.2, dt);
+            o.x += dx * lerpFactor;
+            o.y += dy * lerpFactor;
+            o.nameText.setPosition(o.x, o.y - this.playerSize);
 
-            c.x += (tx - c.x) * 0.6;
-            c.y += (ty - c.y) * 0.6;
-                    }
-    }
-});
+            // Flip sprite based on dx
+            if (dx < -0.1) {
+                o.setFlipX(true);
+            } else if (dx > 0.1) {
+                o.setFlipX(false);
+            }
+
+            // Animate remote player based on movement distance
+            if (dist > 0.5) {
+                if (!o.anims.isPlaying) o.play('enemy-walk');
+            } else {
+                if (o.anims.isPlaying) {
+                    o.stop();
+                    o.setFrame(0);
+                }
+            }
+        }
+
+        if (o.holding) {
+            const c = this.circles.get(o.holding);
+            if (c) {
+                const holdOffset = this.playerSize * 0.6;
+                const tx = o.x;
+                const ty = o.y - holdOffset;
+
+                // Decay-based interpolation for remote player held items
+                const holdLerpFactor = 1 - Math.pow(1 - 0.6, dt);
+                c.x += (tx - c.x) * holdLerpFactor;
+                c.y += (ty - c.y) * holdLerpFactor;
+            }
+        }
+    });
+
     // --- TOUCH MOVE ---
     const fx = this.joyData.forceX;
-const fy = this.joyData.forceY;
+    const fy = this.joyData.forceY;
 
-if (Math.abs(fx) > 0.01 || Math.abs(fy) > 0.01) {
-    this.container.x += fx * this.playerSpeed;
-    this.container.y += fy * this.playerSpeed;
-    moved = true;
-}
+    if (Math.abs(fx) > 0.01 || Math.abs(fy) > 0.01) {
+        this.container.x += fx * this.playerSpeed * dt;
+        this.container.y += fy * this.playerSpeed * dt;
+        moved = true;
+    }
 
     // --- KEYBOARD MOVE ---
-    if (this.cursors.A.isDown) { this.container.x -= speed; moved = true; }
-    if (this.cursors.D.isDown) { this.container.x += speed; moved = true; }
+    let dirX = 0;
+    if (this.cursors.A.isDown) { this.container.x -= speed; moved = true; dirX = -1; }
+    if (this.cursors.D.isDown) { this.container.x += speed; moved = true; dirX = 1; }
     if (this.cursors.W.isDown) { this.container.y -= speed; moved = true; }
     if (this.cursors.S.isDown) { this.container.y += speed; moved = true; }
+
+    // Flip local player based on movement direction
+    if (moved) {
+        if (dirX === 0 && Math.abs(fx) > 0.01) {
+            dirX = fx;
+        }
+        if (dirX < 0) {
+            this.container.setFlipX(true);
+        } else if (dirX > 0) {
+            this.container.setFlipX(false);
+        }
+
+        if (!this.container.anims.isPlaying) {
+            this.container.play('enemy-walk');
+        }
+    } else {
+        if (this.container.anims.isPlaying) {
+            this.container.stop();
+            this.container.setFrame(0);
+        }
+    }
 
     // --- LIMIT TO ARENA ---
     const dx = this.container.x - this.centerX;
@@ -484,14 +613,39 @@ if (Math.abs(fx) > 0.01 || Math.abs(fy) > 0.01) {
             lastSend = now;
         }
     }
+
+    // Collision with patrolling monster
+    if (this.enemy && this.container && !this.stunned) {
+        const dx = this.container.x - this.enemy.x;
+        const dy = this.container.y - this.enemy.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < this.playerSize * 0.8) {
+            this.stunned = true;
+
+            // drop egg
+            if (this.player.holding) {
+                socket.emit("toggleGrab");
+            }
+
+            // freeze player
+            const oldSpeed = this.playerSpeed;
+            this.playerSpeed = 0;
+
+            this.time.delayedCall(1000, () => {
+                this.playerSpeed = oldSpeed;
+                this.stunned = false;
+            });
+        }
+    }
+
     // --- GRAB ---
-    if (Phaser.Input.Keyboard.JustDown(this.cursors.F))
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.F) && !this.stunned)
     {
         socket.emit("toggleGrab");
     }
-    // Server sends updated circle positions
-
 }
+
 function resetLocalGame() {
     matchStartTime = Date.now();
     // reset player
@@ -508,11 +662,23 @@ function resetLocalGame() {
 
     // destroy zones
     this.zones.forEach(z => {
-        z.destroy();
+        if (z.nameLabel) z.nameLabel.destroy();
         z.countText.destroy();
+        z.destroy();
     });
     this.zones.clear();
 }
+
+function escapeHTML(str) {
+    if (!str) return "";
+    return str.toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 function showEndUI(winner, duration) {
     document.getElementById("endUI").style.display = "flex";
     document.getElementById("winnerText").innerText = `Winner: ${winner}`;
@@ -520,13 +686,13 @@ function showEndUI(winner, duration) {
     let html = `<h3>Scoreboard</h3>`;
 
     for (let p in winCounts) {
-        html += `<div>🏆 ${p}: ${winCounts[p]} wins</div>`;
+        html += `<div>🏆 ${escapeHTML(p)}: ${winCounts[p]} wins</div>`;
     }
 
     html += `<hr><h3>Match History</h3>`;
 
     matchHistory.forEach((m, i) => {
-        html += `<div>#${i + 1} — ${m.winner} — ${m.time}s</div>`;
+        html += `<div>#${i + 1} — ${escapeHTML(m.winner)} — ${m.time}s</div>`;
     });
 
     document.getElementById("statsBox").innerHTML = html;

@@ -164,10 +164,17 @@ socket.on('roomCreated', (roomName) => {
 // Copy to clipboard
 function copyRoomCode() {
   const input = document.getElementById('createdRoom');
-  input.select();
-  input.setSelectionRange(0, 99999);
-  document.execCommand("copy");
-  alert("Room code copied!");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value)
+      .then(() => alert("Room code copied!"))
+      .catch(() => alert("Failed to copy room code."));
+  } else {
+    // Fallback
+    input.select();
+    input.setSelectionRange(0, 99999);
+    document.execCommand("copy");
+    alert("Room code copied!");
+  }
 }
 
 // Only enter game when user is ready
